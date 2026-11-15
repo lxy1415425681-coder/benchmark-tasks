@@ -1,0 +1,13 @@
+{
+  "title": "Coil and hang a rope on a wall hook",
+  "category": "Impact on jobs",
+  "keywords": ["rope", "coiling", "bimanual", "deformable"],
+  "instruction": "Coil the rope lying on the table into a loop and hang it on the wall hook so the coil hangs freely with no rope touching the table.",
+  "context": "Rope coiling and stowing is a routine task in construction, warehouses, and marine settings. Keeping ropes organized and off the floor prevents trip hazards and equipment damage.",
+  "setup": "One brown braided-nylon rope (120 cm long, 12 mm diameter, ~130 g) lies loosely and uncrossed on a wooden table (120 x 80 x 4 cm). A steel J-hook (40 mm projection, 10 mm diameter rod, silver) is mounted on a grey panel 40 cm above and 30 cm behind the table's far edge. Two YAM arms with parallel grippers face the table. The fixed layout is shown in the screenshot.",
+  "scoring": "0.25 if the rope is lifted fully off the table for one continuous second with both grippers holding it; 0.5 if the rope is coiled with all segments within 15 cm of the coil centroid; 1.0 if the coil hangs on the hook for five continuous seconds with no rope touching the table and both grippers released. All other outcomes score 0.",
+  "run_limit": "3000 steps (150 seconds at 20 Hz), including the five-second hang check.",
+  "reset_notes": "Uncoil the rope and restore the flat uncrossed layout on the table.",
+  "fidelity": "20 joined capsules approximate braided nylon; grasping uses physical contact with no endpoint forces assisting coiling. Mass follows a commercial 12 mm rope; friction and bending stiffness are uncalibrated. Fibres, stretch and wear are omitted. Physics runs at 240 Hz; control stays at 20 Hz.",
+  "scores": "Dream-1 run: 0.0; demo: 1.0. Both independently replayed."
+}
