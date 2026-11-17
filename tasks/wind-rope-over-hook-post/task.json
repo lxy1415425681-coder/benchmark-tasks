@@ -1,7 +1,15 @@
 {
   "title": "Wind a rope three times over a hook post, holding both ends clear of the table",
   "category": "Impact on jobs",
-  "keywords": ["bimanual", "rope", "deformable", "winding", "hook", "regrasping", "slack management"],
+  "keywords": [
+    "bimanual",
+    "rope",
+    "deformable",
+    "winding",
+    "hook",
+    "regrasping",
+    "slack management"
+  ],
   "instruction": "Wind the rope over the hook's post: hold one end of the rope in the air with one hand, to the left of the hook. With the other hand, carry the rope round the front of the post and up over the post's top to its right side, three times, taking hold of the rope further along after each pass. End with both hands holding the rope and no part of the rope touching the table.",
   "context": "Taking turns of a line over a post, pin or hook while keeping hold of the standing part is how deckhands, riggers and stagehands secure and stow a line (O*NET 53-5011.00 Sailors and Marine Oilers; 27-4011.00 Audio and Video Technicians). One hand must keep the standing end still and in the air while the other hand repeatedly carries the rope round the post, lets go and takes fresh rope further along, without pulling off what is already on the post or letting the rope drag on the table.",
   "setup": "Station table (110 x 130 cm); positions in cm from the midpoint between the two arm bases projected onto the table (x forward away from the robot, y to the robot's left). J-shaped rope hook, grey, fixed to the table on the centre line: a wall panel (painted wood or PLA, 2 cm thick in x, 24 cm wide in y, 20 cm tall) stands on the table with its front face at x 33, centred on y 0; a square steel bar (12 x 12 mm) sticks out of the panel toward the robot along x, its centre line 10 cm above the table, from x 33 to x 20, where it turns up through a rounded bend into a vertical steel post, 16 mm diameter, centred at x 20, y 0, running from the bar (9.4 cm above the table) to its free, flat top 17 cm above the table. Nothing else stands within 6.5 cm of the post. Rope: brown hemp rope, 12 mm diameter, 100 cm long, 160 g. Start: the rope lies straight on the table along y at x 10 (10 cm in front of the post), its left end at y +37 and its right end at y -63.",
@@ -9,5 +17,6 @@
   "run_limit": "2,000 steps (100 seconds at 20 Hz)",
   "reset_notes": "Take the rope off the post and lay it straight along the tape line at x 10 cm, left end at y +37 cm and right end at y -63 cm. Check the hook panel is at its mark and the post is upright.",
   "fidelity": "Rope is 50 rigid 2 cm capsule segments with bending springs (stiffness 0.002 N·m/rad, light damping, at most 1.6 rad per joint), no twist, stretch or plasticity, self-collision on, friction 0.5; its colliders are 8-sided prisms so a straight rope cannot roll on the table. The hook (panel, bar, bend and post) is fixed and rigid. Mass follows a commercial 12 mm hemp rope; bending stiffness and friction are not calibrated. Physics runs at 240 Hz; control is at 20 Hz. Passes, holding and table contact are computed from the gripper positions and the rope's centre line.",
-  "scores": "Dream-1 run: 0.0; demo: 1.0"
+  "scores": "Dream-1 run: 0.0; demo: 1.0",
+  "media": "M-UJB23Y"
 }
