@@ -1,21 +1,24 @@
-"""Butt-weld two aluminium pipes lying in V-blocks: slide the loose pipe home against the fixed one, unlock the
-welding pliers on their stand, lock them over the joint, MIG-weld at least three 30-degree stretches through the slots
-in their bands (turning the pipes in their V-blocks), unlock them and lock them back on their stand, then weld the rest
-of the joint all round, turning the pipes; finish with the gun on its rest and both hands clear.
+"""Butt-weld two aluminium pipes lying in V-blocks: slide the loose pipe home against the fixed one, squeeze the
+spring clamp open on its stand, put it over the joint and let it close, MIG-tack the joint through the slots in its
+bands (turning the pipes in their V-blocks), squeeze it open and set it back on its stand, then weld the rest of the
+joint all round, turning the pipes; finish with the gun on its rest and both hands clear.
 
 Scene (world frame: x forward from the arm bases, y left, z up; positions in this file's constants):
-- two 1 1/2 in Schedule 40 aluminium pipes (48.3 mm, 30 cm) in two steel 90-degree V-blocks, end stops past their
-  outer ends; the fixed pipe carries roll marks 1-3 near its outer end;
-- pipe-welding locking pliers (stainless, 0.5 kg): jaws ending in slotted half-ring bands; locked on a pipe-stub stand;
+- two 1 1/2 in Schedule 40 aluminium pipes (48.3 mm, 30 cm), each level in two steel 90-degree V-blocks, end stops
+  past their outer ends; the fixed pipe carries roll marks 1-3 near its outer end;
+- a JTLD pipe-welding spring clamp (stainless, 0.5 kg): two sprung halves on a pivot whose jaws end in slotted
+  half-ring bands; normally shut, squeezed to open; clamped on a pipe-stub stand;
 - MIG gun on its rest (front right);
-- both grippers wear ceramic-fibre covers: a sleeve on each finger and a jacket over the gripper.
+- both grippers wear fiberglass welding-blanket covers: a sleeve on each finger and a jacket over the gripper.
 
-Run the scripted demo: python rundemo.py task.py OUT_DIR --max-steps 7200 (PRW_DEMO=noclamp: welds without the pliers).
+Run the scripted demo: python rundemo.py task.py OUT_DIR --max-steps 7200 (PRW_DEMO=noclamp: welds without the clamp;
+PRW_DEMO=tacks: stops after the tacks; PRW_DEBUG=FILE: logs the wire tip on every weld move).
 """
 
 from __future__ import annotations
 
 import math
+import os
 import pathlib
 import sys
 
@@ -29,14 +32,14 @@ SCENE = "station"
 TOP = TABLE_TOP[SCENE]
 
 INSTRUCTION = (
-    "Slide the loose pipe along its V-block until its end meets the other pipe's end. The welding pliers are locked "
-    "on their stand: squeeze their handles hard to unlock them, ease your grip so their jaws spring open, put them "
-    "over the joint and squeeze the handles shut to lock them on. With the pliers on, MIG-weld at least three "
-    "30-degree stretches of the joint through the slots in the pliers' bands, turning the pipes in their V-blocks as "
-    "needed but never tipping the pliers more than about 30 degrees from upright (further, their weight rolls the "
-    "pipes over). Then set the pliers upright, squeeze the handles hard to unlock them and lock them back on their "
-    "stand. Weld the rest of the joint all the way round, turning the pipes to bring each part on top. Finish with "
-    "the gun on its rest and both hands clear."
+    "Slide the loose pipe along its V-blocks until its end meets the other pipe's end. The welding clamp is clamped on "
+    "its stand, its spring holding its jaws shut: squeeze its handles together to open the jaws, lift it off, put it "
+    "over the joint and let go so it grips both pipes. With the clamp on, tack the joint through the slots in the "
+    "clamp's bands, at least 1 s of arc on each of at least three 10-degree stretches, turning the pipes in their "
+    "V-blocks as needed but never tipping the clamp more than about 30 degrees from upright (further, it slips round "
+    "the pipe and falls over). Then set the clamp upright, squeeze its handles to open it, lift it off and let it close"
+    " on its stand again. Weld the rest of the joint all the way round, turning the pipes to bring each part on top. "
+    "Finish with the gun on its rest and both hands clear."
 )
 
 # -- colours ---------------------------------------------------------------------------------------------------------
@@ -53,7 +56,7 @@ GUN_BLACK = (0.10, 0.10, 0.11)
 COPPER = (0.72, 0.45, 0.20)
 MARK_COLORS = ((0.95, 0.95, 0.95), (0.95, 0.80, 0.10), (0.15, 0.35, 0.85))  # marks 1, 2, 3
 BEAD = (0.95, 0.42, 0.08)  # a welded segment, drawn orange
-SLEEVE = (0.93, 0.91, 0.86)  # ceramic-fibre finger sleeves (off-white)
+SLEEVE = (0.93, 0.91, 0.86)  # fiberglass finger sleeves (off-white)
 
 # -- geometry (m) ----------------------------------------------------------------------------------------------------
 AX_X = 0.19  # pipe axis, x, at the start (each roll moves the pipe ~3.5 cm along +x)
@@ -65,6 +68,8 @@ AX_Z = TOP + PIPE_R * math.sqrt(2) + 0.0003  # pipe axis height: in the 90 deg V
 VBLOCK_Y = (-0.26, 0.26)  # the V-blocks' centres (y): 2-4 cm in from the pipes' outer ends, so the pipes can't run
 # off them
 VBLOCK_L = 0.040  # their length along the pipes
+VBLOCK_IN_Y = (-0.10, 0.10)  # a second pair, 10 cm either side of the joint: each pipe rests level in two V-blocks
+# (in one, near its outer end, it tipped nose-down onto the table and the two pipes met 5 deg out of line)
 END_STOP_Y = (-0.336, 0.306)  # steel end stops just past the loose pipe's starting outer end and behind the fixed
 # pipe's outer end: the pipes can't creep off their V-blocks
 JOINT_Y = 0.0  # the joint, once the loose pipe is home
@@ -73,44 +78,44 @@ FIX_Y = (JOINT_Y, JOINT_Y + PIPE_L)  # fixed pipe's ends
 LOOSE_Y = (JOINT_Y - GAP0 - PIPE_L, JOINT_Y - GAP0)
 MARK_Y = FIX_Y[1] - 0.006  # roll marks: on the fixed pipe beside its square end
 
-# Pipe-welding locking pliers (after the reference photos): Vise-Grip-style locking pliers, stainless, 0.5 kg, whose
-# jaws end in two half-ring bands that wrap the pipe from either side, 44 mm wide along it and centred on the joint.
-# Each band is slotted from its tip to 40 deg from the top (a 20 mm slot along the joint), so the joint shows through
-# both sides and through the gap between the bands' tips underneath; only its top 80 deg, under the pliers' head, is
-# covered. Clamp frame = seated: origin on the pipes' axis at the joint, y along the pipes, z up; the pliers stand in
-# the x-z plane over the joint. The fixed jaw's band (far side, +x) reaches to 90 deg, so the pliers come straight
-# down onto the pipe; the movable jaw's band (near side) wraps on to 150 deg. The jaw screw is preset for 48.3 mm pipe.
-# Squeezing the handles shut takes the toggle past centre and locks the jaws; let go, then squeeze hard again, pressing
-# in the red release trigger along the movable handle, and they unlock; a spring then opens them.
-CLAMP_MASS, LEVER_MASS, TRIGGER_MASS = 0.36, 0.12, 0.02  # 0.5 kg in all
-PY_F, PY_L, PLATE_T = 0.0045, -0.0045, 0.008  # the body's and the lever's planes (y) and their thickness
+# JTLD pipe-welding spring clamp (after the reference photos): two stainless halves on a pivot, each a jaw ending in a
+# half-ring band and a handle on the same side, 0.5 kg in all. The bands wrap the pipe from either side, each from 5 to
+# 135 deg from the top, 44 mm wide along it and centred on the joint. Each band is slotted from its tip to 40 deg from
+# the top (a 28 mm slot along the joint: room for a 16 mm nozzle with the clamp a few mm off centre), so the joint shows through both sides and through the gap between the bands'
+# tips underneath; only its top 80 deg, under the clamp's head, is covered. Clamp frame = seated: origin on the pipes'
+# axis at the joint, y along the pipes, z up; the clamp stands in the x-z plane over the joint.
+# A spring holds the jaws shut: it presses the bands onto the pipe and grips it with nobody holding the clamp.
+# Squeezing the handles together swings both jaws open (each band out about the pivot; at 10 deg each its tip is ~5 mm
+# clear of the pipe's widest point), so the clamp goes on and comes off straight down and up; let go, and the spring
+# closes the bands on the pipe again. Nothing snaps into place: the bands grip and centre the pipes only by contact
+# (their 135 deg wrap pushes the pipe ends to the jaws' centre and into line). With nothing in the jaws they close
+# past shut to a stop at -8 deg.
+CLAMP_MASS, LEVER_MASS = 0.25, 0.25  # the two halves, 0.5 kg in all
+PY_F, PY_L, PLATE_T = 0.0045, -0.0045, 0.008  # the halves' planes (y) and their thickness
 ZP = 0.052  # the pivot, over the pipes' axis
-BAND_Y, SLOT_Y = 0.022, 0.010  # the bands' half-width and their slots' half-width, along y
+BAND_Y, SLOT_Y = 0.022, 0.014  # the bands' half-width and their slots' half-width, along y
 SLOT_FROM = 40  # the slots run from the bands' tips to this far (deg) from the top
-PAD_IN, PAD_T = 0.0008, 0.005  # the bands' clearance from the pipe and their thickness
-FIXED_BAND, LEVER_BAND = (5, 90), (-5, -150)  # deg from the top (+: toward +x)
-OPEN_DEG = 30.0  # the movable jaw's spring-open angle (hinge travel 0..30 deg)
-LEVER_K, LEVER_REST = 2.46, 30.0  # opening spring (N*m/rad, to fully open): a hand carrying the pliers by the
-# handles squeezes them to ~16 deg (~10 N; the movable band then clears the pipe); ~21 N squeezes them shut
-LOCK_K = 40.0  # over-centre: once squeezed shut, the toggle holds the jaws shut this stiffly ...
-LOCK_REST = -2.0  # ... pressed against their stop (aimed 2 deg past it, so they rest on it instead of chattering)
-LOCK_DEG = 4.0  # handles squeezed within this of shut: locked
-HANDLE_OUT = 0.014  # the fixed handle's outer face, x -14 mm
-LEVER_OUT = 0.017  # the release trigger's outer face (on the movable handle), x +17 mm with the jaws shut
-Z1 = ZP + 0.060  # where a hand pinches the handles: to carry, lock and release them
+PAD_IN, PAD_T = 0.0, 0.005  # the bands' inner faces sit on the pipe with the jaws shut; their thickness
+FIXED_BAND, LEVER_BAND = (5, 135), (-5, -135)  # deg from the top (+: toward +x)
+OPEN_DEG = 28.0  # the handles squeezed together as far as they go: the jaws 28 deg open (14 deg each side)
+SHUT_STOP = -8.0  # with nothing in the jaws the spring closes them to this (deg)
+LEVER_K, LEVER_REST = 3.7, -25.0  # closing spring (N*m/rad), aimed 25 deg past shut: shut on the pipe it presses
+# each band on with ~22 N; holding the jaws CARRY_DEG open takes ~34 N at the grips (85 mm up the
+# handles: the long handles give the hand the leverage)
+GRIP_DEG = (-2.5, 1.5)  # jaws within this of shut (deg): the bands are pressed onto a 48.3 mm pipe
+HANDLE_OUT = 0.034  # the handles' outer faces, x +-34 mm with the jaws shut
+Z1 = ZP + 0.085  # where a hand pinches the handles: to carry, open and release them
 GRIP_FRICTION = (0.8, 0.7)  # knurled handles
-GRIP_W, GRIP_YC, GRIP_Z = 0.036, 0.0, (ZP + 0.050, ZP + 0.088)  # the handles' grips: width, centre (y), extent (z)
-TRIG_TRAVEL, TRIG_RELEASE = 0.005, 0.003  # the trigger's travel, and pressed past this: unlocked (once armed)
-TRIG_ARM = 0.001  # locked, the trigger arms once it's back out within this
-TRIG_K, TRIG_PRELOAD = 1500.0, 32.0  # N/m, N (36.5 N to press it to TRIG_RELEASE; a hand squeezing as hard as it
-# goes measured ~41 N)
-LOCK_FORCE = 28.0  # N: how hard the demo's hand squeezes to lock them
+GRIP_W, GRIP_YC, GRIP_Z = 0.036, 0.0, (ZP + 0.068, ZP + 0.102)  # the handles' grips: width, centre (y), extent (z)
 GRIPPER_K = 5000.0  # the gripper is a position servo: N per m short of where it's told to close (50 N at most)
-CARRY_FORCE = 10.0  # N: the opening spring's push at CARRY_DEG, which a carrying hand balances
-CARRY_DEG = 16.0  # a carrying hand squeezes the open handles to about this
-LOCK_POS, LOCK_ANG = 0.012, 10.0  # the jaws grip the pipes if locked within 12 mm and 10 deg of seated
-CLAMP_REST = (AX_X, 0.42)  # their stand (a pipe stub they're locked on), past the left pipe's end
-COVERED = SLOT_FROM + 5  # the gun keeps this far (deg) from the top of the clamped pliers' bands
+CARRY_DEG = 20.0  # a hand squeezes the handles to hold the jaws this far open (bands' tips ~5 mm clear of the pipe)
+CARRY_FORCE = 34.0  # N: the spring's push on the handles at CARRY_DEG, which that hand balances (the YAM gripper
+# squeezes up to ~41 N)
+ON_JOINT_Y, ON_JOINT_R, ON_JOINT_ANG = 0.008, 0.003, 5.0  # the clamp counts as on the joint (for tacks) with its
+# bands' centre within 8 mm of the joint along the pipes (the joint inside the 28 mm slots), its pivot within 3 mm of
+# its seated distance from the pipes' axis and its plane within 5 deg of square to the axis; measured, never enforced
+CLAMP_REST = (AX_X, 0.42)  # its stand (a pipe stub it is clamped on), past the left pipe's end
+COVERED = SLOT_FROM + 5  # the gun keeps this far (deg) from the top of the clamp's bands
 
 # Marks 1, 2, 3 at 0, -120 and -240 deg round the fixed pipe: each comes on top by turning the pipe +120 deg, its
 # top away from the robot (the way a hand rolls it reliably; dragged toward the robot it slipped)
@@ -121,6 +126,8 @@ WELD_REACH = 0.004  # the wire tip within 4 mm of the joint line heats the segme
 WELD_THIRD_S = 1.0  # a segment is welded once the tip has spent at least 1 s over each of its three 10 deg thirds ...
 WELD_MIN_S = 3.0  # ... and 3 s over it in all ...
 WELD_MAX_S = 5.0  # ... and burned through (a hole: it doesn't count, ever) once it has had more than 5 s
+BUTT_GAP = 0.003  # the pipe ends butted: root gap under 3 mm (an open-root butt weld bridges 1.6-3.2 mm; pushed
+# home, the ends sit ~1.5 mm apart in the sim)
 JOIN_SEGMENTS = 3  # the pipes are joined once this many tacks (or welded segments) are laid (and butted)
 
 GUN_HANDLE = (0.032, 0.15, 0.032)
@@ -157,9 +164,9 @@ kit.part("pipe_loose", (AX_X, JOINT_Y - PIPE_L / 2, AX_Z), [  # declared home (b
     mk.cyl(PIPE_R, 0.03, (0, PIPE_L / 2 - 0.015, 0), axis="y", color=BRIGHT),
 ], mass=PIPE_MASS, color=PIPE, friction=(0.35, 0.3),
          spawn=((AX_X, (LOOSE_Y[0] + LOOSE_Y[1]) / 2, AX_Z), (0.0, 0.0, 0.0, 1.0)))
-kit.latch("pipe_weld", "pipe_fixed", "pipe_loose")  # in line: held by the locked clamp, then by the tacks
+kit.latch("pipe_weld", "pipe_fixed", "pipe_loose")  # joined where they are once tacked (engage_here; no snap)
 
-# -- welding pliers (free), declared seated over the joint, shut; they start locked on their stand ------------------
+# -- welding clamp (free), declared seated over the joint, shut; it starts clamped on its stand -------------------
 def arc_pad(a0, a1, y0, y1):
     """A piece of band: the arc from a0 to a1 deg (from the top, toward +x), over y0..y1."""
     a, span = math.radians((a0 + a1) / 2), math.radians(abs(a1 - a0))
@@ -182,7 +189,7 @@ def band(a0, a1):
 
 
 def link(p0, p1, y, width, color=None):
-    """A flat bar in the pliers' plane (at y) from (x, z) p0 to p1."""
+    """A flat bar in the clamp's plane (at y) from (x, z) p0 to p1."""
     dx, dz = p1[0] - p0[0], p1[1] - p0[1]
     return mk.box((width, PLATE_T, math.hypot(dx, dz)), ((p0[0] + p1[0]) / 2, y, (p0[1] + p1[1]) / 2),
                   quat=rq((0, 1, 0), math.atan2(dx, dz)), color=color)
@@ -193,14 +200,18 @@ def band_top(deg):
     return (r * math.sin(a), r * math.cos(a))
 
 
-clamp_boxes = band(*FIXED_BAND) + [
-    link(band_top(8), (0.006, ZP - 0.004), PY_F, 0.010),  # the fixed jaw, from its band up to the pivot
-    mk.cyl(0.008, PLATE_T, (0.0, PY_F, ZP), axis="y"),  # pivot boss
-    link((0.004, ZP), (-0.010, ZP + 0.016), PY_F, 0.009),
-    link((-0.010, ZP + 0.016), (-0.010, ZP + 0.094), PY_F, 2 * (HANDLE_OUT - 0.010)),  # fixed handle, x -14..-6 mm
-    mk.cyl(0.0065, 0.016, (-0.010, PY_F, ZP + 0.100), axis="z"),  # the jaw-adjusting screw (preset)
-    mk.box((0.004, GRIP_W, GRIP_Z[1] - GRIP_Z[0]), (-HANDLE_OUT + 0.002, GRIP_YC, (GRIP_Z[0] + GRIP_Z[1]) / 2)),
-]
+def half(side, py):
+    """One half of the clamp: its band and its handle both on the ``side`` (+1: +x) of the pipe; squeezing the
+    handles together swings the bands apart."""
+    s = side
+    return band(*(FIXED_BAND if s > 0 else LEVER_BAND)) + [
+        link(band_top(8 * s), (0.006 * s, ZP - 0.004), py, 0.010),  # the jaw, from its band up to the pivot
+        mk.cyl(0.008, PLATE_T, (0.0, py, ZP), axis="y"),  # pivot boss
+        link((0.004 * s, ZP), (0.030 * s, ZP + 0.016), py, 0.009),
+        link((0.030 * s, ZP + 0.016), (0.030 * s, ZP + 0.110), py, 2 * (HANDLE_OUT - 0.030)),  # handle, 26-34 mm out
+        mk.box((0.004, GRIP_W, GRIP_Z[1] - GRIP_Z[0]),
+               (s * (HANDLE_OUT - 0.002), GRIP_YC, (GRIP_Z[0] + GRIP_Z[1]) / 2)),  # its knurled grip
+    ]
 
 
 def _com(boxes):
@@ -208,24 +219,16 @@ def _com(boxes):
     return tuple(float(c) for c in (v[:, None] * np.array([b.at for b in boxes])).sum(0) / v.sum())
 
 
+_rest_pivot = np.array([CLAMP_REST[0], CLAMP_REST[1], AX_Z + ZP])
+CLAMP_SPAWN = ((CLAMP_REST[0], CLAMP_REST[1], AX_Z + 0.0003), (0.0, 0.0, 0.0, 1.0))
+clamp_boxes = half(+1, PY_F)
 kit.part("clamp", (AX_X, JOINT_Y, AX_Z), clamp_boxes, mass=CLAMP_MASS, color=STAINLESS, friction=GRIP_FRICTION,
-         com=_com(clamp_boxes), spawn=((CLAMP_REST[0], CLAMP_REST[1], AX_Z), (0.0, 0.0, 0.0, 1.0)))
-kit.latch("clamp_lock", "pipe_fixed", "clamp")  # the locked jaws' grip on the pipes
-lever_boxes = band(*LEVER_BAND) + [
-    link(band_top(-8), (-0.004, ZP - 0.004), PY_L, 0.010),  # the movable jaw, from its band up to the pivot
-    link((-0.004, ZP), (0.009, ZP + 0.014), PY_L, 0.008),
-    link((0.009, ZP + 0.014), (0.009, ZP + 0.092), PY_L, 0.006),  # movable handle, x 6..12 mm
-    mk.box((0.001, GRIP_W, GRIP_Z[1] - GRIP_Z[0]), (0.0125, GRIP_YC, (GRIP_Z[0] + GRIP_Z[1]) / 2)),  # trigger's seat
-]
+         com=_com(clamp_boxes), spawn=CLAMP_SPAWN)
+lever_boxes = half(-1, PY_L)
 kit.part("lever", (AX_X, JOINT_Y, AX_Z), lever_boxes, mass=LEVER_MASS, color=STAINLESS, friction=GRIP_FRICTION,
          com=_com(lever_boxes))
-kit.hinge("lever_pivot", "clamp", "lever", (AX_X, JOINT_Y + PY_L, AX_Z + ZP), (0, 1, 0), 0.0, OPEN_DEG,
-          start_deg=0.0, stiffness=LOCK_K, rest_deg=LOCK_REST, damping=0.05)  # starts locked; _lock_step switches it
-kit.part("trigger", (AX_X, JOINT_Y, AX_Z), [
-    mk.box((0.004, GRIP_W, GRIP_Z[1] - GRIP_Z[0]), (LEVER_OUT - 0.002, GRIP_YC, (GRIP_Z[0] + GRIP_Z[1]) / 2)),
-], mass=TRIGGER_MASS, color=RED, friction=GRIP_FRICTION)
-kit.slider("trigger_slide", "lever", "trigger", (-1, 0, 0), 0.0, TRIG_TRAVEL, stiffness=TRIG_K,
-           rest=-TRIG_PRELOAD / TRIG_K, damping=5.0)
+kit.hinge("lever_pivot", "clamp", "lever", (AX_X, JOINT_Y, AX_Z + ZP), (0, 1, 0), SHUT_STOP, OPEN_DEG,
+          start_deg=0.0, stiffness=LEVER_K, rest_deg=LEVER_REST, damping=0.05)  # +: the jaws open
 
 # -- V-blocks (fixed): steel, 90 deg V, a relief slot along the V's bottom; one under each pipe's outer end --------
 def vblock_boxes():
@@ -241,7 +244,7 @@ def vblock_boxes():
     return out
 
 
-for i, vy in enumerate(VBLOCK_Y):
+for i, vy in enumerate(VBLOCK_Y + VBLOCK_IN_Y):
     kit.part(f"vblock{i}", (AX_X, vy, TOP), vblock_boxes(), color=STEEL, friction=(0.6, 0.55))  # aluminium on steel
 for i, sy in enumerate(END_STOP_Y):
     out = 1.0 if sy > 0 else -1.0
@@ -249,8 +252,8 @@ for i, sy in enumerate(END_STOP_Y):
                                               mk.box((0.060, 0.030, 0.006), (0.0, out * 0.012, 0.003))], color=STEEL)
 
 # -- rests (fixed) ---------------------------------------------------------------------------------------------------
-# The pliers' stand: a 10 cm stub of the same pipe on a steel foot; the pliers start locked on it. A thin ridge along
-# its top sits in the gap between the bands' tops and keeps the pliers upright.
+# The clamp's stand: a 10 cm stub of the same pipe on a steel foot; the clamp starts clamped on it. A thin ridge
+# along its top sits in the gap between the bands' tops.
 kit.part("clamp_rest", (CLAMP_REST[0], CLAMP_REST[1], AX_Z), [
     mk.cyl(PIPE_R, 0.10, (0.0, 0.0, 0.0), axis="y"),
     mk.box((0.003, 0.090, 0.005), (0.0, 0.0, PIPE_R + 0.0015)),  # the ridge
@@ -302,67 +305,33 @@ def lever_deg(objects) -> float:
     return kit.q_deg(objects, "lever_pivot")
 
 
-def trigger_in(objects) -> float:
-    """How far the release trigger is pressed in (m)."""
-    return kit.q(objects, "trigger_slide")
+def gripping() -> bool:
+    """The clamp is squeezed shut on the joint (as measured at the last control step)."""
+    return bool(mk.MEMORY.get("gripping"))
 
 
-def lever_locked() -> bool:
-    return bool(mk.MEMORY.get("lever_locked"))
+def clamp_on_joint(objects) -> bool:
+    """Measured, never enforced: the jaws are squeezed onto a pipe and the clamp sits over the joint (ON_JOINT_*)."""
+    q = lever_deg(objects)
+    if not GRIP_DEG[0] < q < GRIP_DEG[1]:
+        return False
+    c, r = joint_frame(objects)
+    v = pivot(objects) - c
+    along = float(r[:, 1] @ v)
+    radial = float(np.linalg.norm(v - r[:, 1] * along))
+    _, skew = clamp_seat_error(objects)
+    return abs(along) < ON_JOINT_Y and abs(radial - ZP) < ON_JOINT_R and skew < ON_JOINT_ANG
 
 
-
-def _set_lever_spring(locked: bool) -> None:
-    """The toggle past centre holds the jaws shut (a stiff spring to 0); unlocked, the opening spring takes over."""
-    if mk.MEMORY.get("lever_spring") == locked:  # per episode: a reset may re-author the joint
-        return
-    path = mk._SIM["joint_paths"].get((kit.id, "lever_pivot"))
-    if not path or mk._SIM["stage"] is None:
-        return
-    from pxr import UsdPhysics
-
-    k, rest = (LOCK_K, LOCK_REST) if locked else (LEVER_K, LEVER_REST)
-    drive = UsdPhysics.DriveAPI(mk._SIM["stage"].GetPrimAtPath(path), "angular")
-    drive.GetStiffnessAttr().Set(float(k * math.pi / 180.0))
-    drive.GetTargetPositionAttr().Set(float(rest))
-    mk.MEMORY["lever_spring"] = locked
+def pivot(objects):
+    return kit.point(objects, "clamp", (0.0, 0.0, ZP))
 
 
-def _lock_step(objects) -> None:
-    """Squeezed shut, the pliers lock (and grip the pipes if seated over the joint). Once the hand has let the
-    release trigger spring back out, the next squeeze that presses it in unlocks them."""
-    tin = trigger_in(objects)
-    if "lever_locked" not in mk.MEMORY:  # a new episode: the pliers start locked on their stand, trigger out
-        mk.MEMORY["lever_locked"] = lever_deg(objects) < LOCK_DEG
-        mk.MEMORY["armed"] = True
-        mk.MEMORY["can_lock"] = True
-        mk.MEMORY["lever_spring"] = None
-    if lever_locked():
-        if tin < TRIG_ARM:
-            mk.MEMORY["armed"] = True  # the trigger is back out: the next press releases
-        elif mk.MEMORY.get("armed") and tin > TRIG_RELEASE:
-            mk.MEMORY["lever_locked"] = False
-            mk.MEMORY["can_lock"] = False  # not again until the jaws have opened
-            if kit.engaged("clamp_lock"):
-                kit.release("clamp_lock")
-                if not joined_by_weld() and kit.engaged("pipe_weld"):
-                    kit.release("pipe_weld")  # not welded yet: the pipes come apart again
-    elif lever_deg(objects) > 2 * LOCK_DEG:
-        mk.MEMORY["can_lock"] = True
-    elif mk.MEMORY.get("can_lock") and lever_deg(objects) < LOCK_DEG:
-        mk.MEMORY["lever_locked"] = True
-        mk.MEMORY["armed"] = tin < TRIG_ARM
-        d, a = clamp_seat_error(objects)
-        if d < LOCK_POS and a < LOCK_ANG:
-            # Locked over the joint, the bands close round both pipes: they centre the pliers on the joint and pull
-            # the pipes into line.
-            kit.engage("clamp_lock")
-            if not kit.engaged("pipe_weld"):
-                kit.engage("pipe_weld")
-    _set_lever_spring(lever_locked())
+def _grip_step(objects) -> None:
+    mk.MEMORY["gripping"] = clamp_on_joint(objects)
 
 
-kit.on_step(_lock_step)
+kit.on_step(_grip_step)
 
 
 def joint_frame(objects):
@@ -406,7 +375,7 @@ def welded() -> set:
 
 
 def tacked() -> set:
-    """Tacks: the 10 deg thirds (0-35) that got their full WELD_THIRD_S while the pliers were locked on the joint."""
+    """Tacks: the 10 deg thirds (0-35) that got their full WELD_THIRD_S while the clamp gripped the joint."""
     return mk.MEMORY.setdefault("tacked", set())
 
 
@@ -419,17 +388,17 @@ _SHOWN: dict = {}
 
 
 def _weld_step(objects) -> None:
-    """Weld rule: with the pipes butted (gap under 2 mm: a bead can't bridge an open gap), each control step the wire
+    """Weld rule: with the pipes butted (root gap under 3 mm: a bead can't bridge a wider one), each control step the wire
     tip spends at the joint heats the 10 deg third under it. A segment is welded (shown orange) once each of its thirds
-    has had 1 s and the segment 3 s; over 5 s it is burned through and never counts. Welded with the pliers locked
-    on, each third that gets its full 1 s is a tack (a 4 mm bead). Three tacks (or three welded segments) join the
+    has had 1 s and the segment 3 s; over 5 s it is burned through and never counts. Welded with the clamp gripping
+    the joint, each third that gets its full 1 s is a tack (a 4 mm bead). Three tacks (or three welded segments) join the
     pipes."""
     t = third_at(objects, wire_tip(objects))
     w = welded()
-    if t is not None and abs(pipe_gap(objects)) < 0.002:
+    if t is not None and abs(pipe_gap(objects)) < BUTT_GAP:
         h = heat()
         h[t] += DT
-        if h[t] >= WELD_THIRD_S - 1e-9 and kit.engaged("clamp_lock"):
+        if h[t] >= WELD_THIRD_S - 1e-9 and gripping():
             tacked().add(t)
         k = t // 3
         th = h[3 * k:3 * k + 3]
@@ -445,7 +414,7 @@ def _weld_step(objects) -> None:
         if _SHOWN.get(i) != (i in w):
             mk.show_box("pipe_fixed", BEAD0 + i, i in w)
             _SHOWN[i] = i in w
-    if joined_by_weld() and not kit.engaged("pipe_weld") and abs(pipe_gap(objects)) < 0.002:
+    if joined_by_weld() and not kit.engaged("pipe_weld") and abs(pipe_gap(objects)) < BUTT_GAP:
         kit.engage_here("pipe_weld", objects)
 
 
@@ -459,12 +428,12 @@ def pipe_gap(objects) -> float:
     return float(r[:, 1] @ (c - (np.asarray(pl) + r[:, 1] * PIPE_L / 2)))
 
 
-# -- ceramic-fibre finger sleeves (rated to 1200 C): a duck-bill cover on each finger (2 mm wall), added to the -----
+# -- fiberglass finger sleeves (welding-blanket cloth, 540 C): a duck-bill cover on each finger (2 mm wall), added to the -----
 # -- robots' finger links ----------------------------------------------------------------------------------------
 # Finger link frames (from the YAM meshes): the finger runs along -z to its tip at z -0.091; its plate spans
 # x 0.004-0.044 (tip_right: -0.044 to -0.004) and y -0.0545 to -0.0445 (tip_right: +0.0445 to +0.0545).
 SLEEVE_WALL = 0.002
-SLEEVE_FRICTION = (0.7, 0.6)  # woven ceramic-fibre cloth
+SLEEVE_FRICTION = (0.7, 0.6)  # woven fiberglass cloth
 _SLEEVE_BOXES = {  # (centre, size) in the link frame: the full-width sleeve, then the duck-bill tip
     "tip_left": [((0.024, -0.0495, -0.0525), (0.040 + 2 * SLEEVE_WALL, 0.010 + 2 * SLEEVE_WALL, 0.045)),
                  ((0.024, -0.0476, -0.083), (0.016 + 2 * SLEEVE_WALL, 0.0062 + 2 * SLEEVE_WALL, 0.016 + SLEEVE_WALL))],
@@ -505,7 +474,7 @@ def _add_sleeves(stage, env_path) -> None:
                 sim_utils.bind_physics_material(f"{path}/sleeve{i}", mat, stage=stage)
                 sim_utils.bind_visual_material(f"{path}/sleeve{i}", look, stage=stage)
                 n += 1
-    # The ceramic-fibre jacket over each gripper's housing and wrist collar: drawn only (gripper link frame, approach
+    # The fiberglass jacket over each gripper's housing and wrist collar: drawn only (gripper link frame, approach
     # along +z; housing x +-51, y +-32.5 mm, z 30-64 mm)
     grippers = [p for p in stage.Traverse() if str(p.GetPath()).startswith(env_path + "/")
                 and p.GetName() == "gripper" and p.HasAPI(UsdPhysics.RigidBodyAPI)]
@@ -543,22 +512,28 @@ mk.on_author(_add_sleeves)
 
 
 # -- scoring -----------------------------------------------------------------------------------------------------------
-SCORE_REST_POS = 0.02  # the pliers / the gun back within 2 cm of where they started ...
+SCORE_REST_POS = 0.02  # the clamp / the gun back within 2 cm of where they started ...
 GUN_REST_DEG = 20.0  # ... the gun turned under 20 deg
-HANDS_CLEAR = 0.06  # both hands (gripper centre points) this far from the pipes, the pliers and the gun
+HANDS_CLEAR = 0.06  # both hands (gripper centre points) this far from the pipes, the clamp and the gun
 HOLD_STEPS = 20  # all of that, everything still, for 1 s (20 control steps)
 IN_LINE_MM, IN_LINE_DEG = 0.8, 1.0  # the pipes' axes within 0.8 mm and 1 deg of each other
 ON_BLOCK = 0.015  # a pipe's axis within 15 mm of where its V-block holds it, at the block, its end on the block
 
 
 def pipes_in_line(objects) -> bool:
+    off, ang = line_error(objects)
+    return ang < IN_LINE_DEG and off * 1000 < IN_LINE_MM
+
+
+def line_error(objects):
+    """The loose pipe's end off the fixed pipe's axis (m) and the angle between their axes (deg)."""
     c, rf = joint_frame(objects)
     pl, ql = kit.pose(objects, "pipe_loose")
     yf, yl = rf[:, 1], mk.quat_to_mat(ql)[:, 1]
     ang = math.degrees(math.acos(max(-1.0, min(1.0, abs(float(yf @ yl))))))
     end = np.asarray(pl) + yl * PIPE_L / 2  # the loose pipe's joint end, on its axis
     off = (end - c) - yf * float(yf @ (end - c))  # its offset across the fixed pipe's axis
-    return ang < IN_LINE_DEG and np.linalg.norm(off) * 1000 < IN_LINE_MM
+    return float(np.linalg.norm(off)), ang
 
 
 def _on_block(objects, part, by) -> bool:
@@ -573,24 +548,24 @@ def _on_block(objects, part, by) -> bool:
 
 
 def dropped(objects) -> bool:
-    """A pipe off its V-block, or the pliers or the gun fallen off the table."""
+    """A pipe off its V-block, or the clamp or the gun fallen off the table."""
     if not (_on_block(objects, "pipe_loose", VBLOCK_Y[0]) and _on_block(objects, "pipe_fixed", VBLOCK_Y[1])):
         return True
-    return any(objects[n].pos[2] < TOP - 0.02 for n in ("clamp", "lever", "trigger", "gun"))
+    return any(objects[n].pos[2] < TOP - 0.02 for n in ("clamp", "lever", "gun"))
 
 
 def put_away(objects) -> bool:
-    """The pliers locked back on their stand and the gun on its rest."""
+    """The clamp back on its stand and the gun on its rest."""
     pc, _ = kit.pose(objects, "clamp")
-    pliers = lever_locked() and np.linalg.norm(np.asarray(pc) - kit.parts["clamp"].spawn[:3, 3]) < SCORE_REST_POS
+    clamp = np.linalg.norm(np.asarray(pc) - kit.parts["clamp"].spawn[:3, 3]) < SCORE_REST_POS
     pg, qg = kit.pose(objects, "gun")
     r = mk.quat_to_mat(qg)
     turned = math.degrees(math.acos(max(-1.0, min(1.0, float(r[1, 1])))))  # its handle off the rest's line (y)
     gun = np.linalg.norm(np.asarray(pg) - np.array([GUN_REST[0], GUN_REST[1], GUN_Z])) < SCORE_REST_POS
-    return pliers and gun and turned < GUN_REST_DEG
+    return clamp and gun and turned < GUN_REST_DEG
 
 
-_SCORED = ("pipe_fixed", "pipe_loose", "clamp", "lever", "trigger", "gun")
+_SCORED = ("pipe_fixed", "pipe_loose", "clamp", "lever", "gun")
 
 
 STILL_SPEED, STILL_SPIN = 0.01, 0.2  # m/s, rad/s, averaged over a control step (a contact's few-micron hum doesn't
@@ -627,9 +602,9 @@ kit.on_step(_finish_step)
 
 
 def score(objects):
-    """0 if a pipe leaves its V-block or the pliers or the gun fall off the table. Otherwise 0.9 x the fraction of the
-    joint's 12 segments welded (rounded to 0.001), capped at 0.5 unless at least 3 were welded with the pliers locked
-    on (tacks) and the pipes are in line. 1.0 with all 12 welded, the pliers locked back on their stand, the gun on its
+    """0 if a pipe leaves its V-block or the clamp or the gun falls off the table. Otherwise 0.9 x the fraction of the
+    joint's 12 segments welded (rounded to 0.001), capped at 0.5 unless at least 3 were welded with the clamp
+    gripping (tacks) and the pipes are in line. 1.0 with all 12 welded, the clamp back on its stand, the gun on its
     rest, both hands clear and everything still, held for 1 s."""
     if dropped(objects):
         return 0.0
@@ -654,16 +629,16 @@ def _log(ctx, tag):
     st = ctx.states()
     d, a = clamp_seat_error(st)
     print(f"[demo t={ctx.t:5.1f}] {tag}: gap={pipe_gap(st) * 1000:.1f} mm clamp_off={d * 1000:.1f} mm/{a:.1f} deg "
-          f"jaw={lever_deg(st):.1f} deg locked={lever_locked()} gripping={kit.engaged('clamp_lock')} "
+          f"jaw={lever_deg(st):.1f} deg gripping={gripping()} "
           f"welded={sorted(welded())} fixed={np.round((kit.pose(st, 'pipe_fixed')[0] - np.array([AX_X, (FIX_Y[0] + FIX_Y[1]) / 2, AX_Z])) * 1000, 1).tolist()} mm "
-          f"joined={kit.engaged('pipe_weld')} tacks={sorted(tacked())} score={score(st)}", flush=True)
+          f"line={np.round(np.array(line_error(st)) * (1000, 1), 2).tolist()} joined={kit.engaged('pipe_weld')} tacks={sorted(tacked())} score={score(st)}", flush=True)
 
 
 WINDOW_PASS_DEG = (-55.0, 55.0)  # with the clamp on: clear of its bridge (-75 to -90 deg)
 PASS_DEG = (-68.0, 68.0)  # each full pass: the top third of the joint and 8 deg either side, so the passes overlap
 # and a turn a little off still leaves no gap (the nozzle clears the pipe by ~1 mm at 68 deg)
-CARRY_HIGH = TOP + 0.215  # carrying the pliers by the handles (their bands then ~2 cm over the pipes)
-TILT_DEG = -30.0  # with the pliers on, the pipes are turned this far each way (at 45 the pliers' weight beat the
+CARRY_HIGH = TOP + 0.24  # carrying the clamp by the handles (its bands then ~2 cm over the pipes)
+TILT_DEG = -25.0  # with the clamp on, the pipes are turned this far each way (at 45 the clamp's weight beat the
 # V-blocks' grip on the pipes and they rolled over) (first: clockwise seen from the left,
 # the handles tipping toward the robot) to weld each side
 HIGH = TOP + 0.19  # travel height: clears the clamp and its handle (the arms reach ~20 cm here)
@@ -684,23 +659,25 @@ def demo_script(ctx):
     _log(ctx, "pipe pushed home")
     yield from unhold(ctx)
     import os
-    if os.environ.get("PRW_DEMO") == "noclamp":  # test variant: weld the whole joint without the pliers (capped 0.5)
+    if os.environ.get("PRW_DEMO") == "noclamp":  # test variant: weld the whole joint without the clamp (capped 0.5)
         gun = yield from take_gun(ctx)
         yield from weld_round(ctx, gun)
         return
-    yield from clamp_on(ctx)  # left: unlock the pliers on their stand, lower them onto the joint, squeeze: they lock
+    yield from clamp_on(ctx)  # left: squeeze the clamp open on its stand, lower it onto the joint, let go: it grips
     _log(ctx, "clamp on")
     gun = yield from take_gun(ctx)
-    for tilt in (TILT_DEG, -TILT_DEG):  # turn the pipes and pliers so the handles tip down to one side; weld the
+    for tilt in (TILT_DEG, -TILT_DEG):  # turn the pipes and clamp so the handles tip down to one side; tack the
         held = yield from tilt_hold(ctx, tilt)  # other side, now on top, through its slot (the handles clear of the
         yield from sweep(ctx, gun, PASS_DEG)  # gun); then the same the other way
         yield from park_gun(ctx)
-        _log(ctx, f"tilted {tilt:+.0f}, side welded")
+        _log(ctx, f"tilted {tilt:+.0f}, side tacked")
         yield from tilt_back(ctx, held)
-        st = ctx.states()  # make sure the pliers are upright again (they come off straight up)
-        yield from turn_pipe(ctx, tol_deg=6.0, target=mark_angle(st) - clamp_turn(st))
-    yield from clamp_off(ctx)  # left: unlock the pliers, lift them straight off, lock them back on their stand
-    _log(ctx, "clamp off, on its rest")
+    st = ctx.states()  # make sure the clamp is upright again (it comes off straight up); only now, tacked: turned
+    yield from turn_pipe(ctx, tol_deg=10.0, target=mark_angle(st) - clamp_turn(st))  # before, the pipes came apart
+    if os.environ.get("PRW_DEMO") == "tacks":
+        return
+    yield from clamp_off(ctx)  # left: squeeze it open, lift it straight off, set it on its stand and let go
+    _log(ctx, "clamp off, on its stand")
     yield from weld_round(ctx, gun)
 
 
@@ -722,8 +699,8 @@ def weld_round(ctx, gun):
     st = ctx.states()
     pc, _ = kit.pose(st, "clamp")
     pg, qg = kit.pose(st, "gun")
-    print(f"    finish: pliers {np.round((np.asarray(pc) - kit.parts['clamp'].spawn[:3, 3]) * 1000, 1)} mm locked "
-          f"{lever_locked()}; gun {np.round((np.asarray(pg) - np.array([GUN_REST[0], GUN_REST[1], GUN_Z])) * 1000, 1)} mm "
+    print(f"    finish: clamp {np.round((np.asarray(pc) - kit.parts['clamp'].spawn[:3, 3]) * 1000, 1)} mm, jaws "
+          f"{lever_deg(st):.1f} deg; gun {np.round((np.asarray(pg) - np.array([GUN_REST[0], GUN_REST[1], GUN_Z])) * 1000, 1)} mm "
           f"r11 {mk.quat_to_mat(qg)[1, 1]:.3f}; clear {[n for n in _SCORED if not mk.released(st[n], HANDS_CLEAR)]} "
           f"in line {pipes_in_line(st)}; held {mk.MEMORY.get('held', 0)} steps", flush=True)
     yield from L.wait(3.0)
@@ -832,103 +809,95 @@ def squeeze_finger(width, force):
     return finger_for(max(0.0, width - 2 * force / GRIPPER_K))
 
 
-def carry_width(z=Z1):
-    """Width across the handles (fixed handle to trigger) at height z with the jaws open CARRY_DEG."""
-    a = math.radians(CARRY_DEG)
-    return HANDLE_OUT + LEVER_OUT * math.cos(a) + (z - ZP) * math.sin(a)
+def handle_half_width(open_deg, z=Z1):
+    """Half the width across the handles' outer faces at height ``z`` (clamp frame) with the jaws ``open_deg`` open,
+    each half swung open_deg / 2 about the pivot (the handles toward each other)."""
+    h = math.radians(open_deg / 2)
+    return HANDLE_OUT * math.cos(h) - (z - ZP) * math.sin(h)
 
 
-SHUT_W = HANDLE_OUT + LEVER_OUT  # across the handles, shut
+CARRY_W = 2 * handle_half_width(CARRY_DEG)
 
 
 def handle_points(objects, z=Z1):
-    """World points on the outer faces a hand pinches at height ``z`` (clamp frame): the fixed handle's (-x) and the
-    release trigger's on the movable handle (+x)."""
-    return (kit.point(objects, "clamp", (-HANDLE_OUT, GRIP_YC, z)),
-            kit.point(objects, "trigger", (LEVER_OUT, GRIP_YC, z)))
+    """World points on the outer faces a hand pinches at height ``z`` (clamp frame): the +x half's handle and the
+    -x half's."""
+    return (kit.point(objects, "clamp", (HANDLE_OUT, GRIP_YC, z)),
+            kit.point(objects, "lever", (-HANDLE_OUT, GRIP_YC, z)))
 
 
 def _ypr(objects):
-    """The pliers' yaw, pitch, roll (deg) about world z, y, x."""
+    """The clamp's yaw, pitch, roll (deg) about world z, y, x."""
     r = mk.quat_to_mat(kit.pose(objects, "clamp")[1])
     return (round(math.degrees(math.atan2(r[1, 0], r[0, 0])), 1), round(math.degrees(-math.asin(r[2, 0])), 1),
             round(math.degrees(math.atan2(r[2, 1], r[2, 2])), 1))
 
 
 def clamp_turn(objects) -> float:
-    """The pliers' turn about the pipes' axis (deg from upright, +: their top toward +x)."""
+    """The clamp's turn about the pipes' axis (deg from upright, +: their top toward +x)."""
     r = mk.quat_to_mat(kit.pose(objects, "clamp")[1])
     return math.degrees(math.atan2(r[0, 2], r[2, 2]))
 
 
-PRE = 0.045  # carried pliers stop this far over their seat, to measure and correct their offset before going down
+PRE = 0.045  # carried clamp stops this far over their seat, to measure and correct their offset before going down
 FINE = 0.008  # and again this far over it
 
 
-def carry_to(ctx, dest_origin, settle=0.002):
-    """Left hand, pliers in hand: carry them high, then lower them until their frame is at ``dest_origin`` (+settle),
-    correcting for how they hang in the hand and the arm's sag on the way down."""
+def carry_to(ctx, dest_pivot, settle=0.002):
+    """Left hand, open clamp in hand: carry it high, then lower it until its pivot is at ``dest_pivot`` (+settle),
+    correcting for how it hangs in the hand and the arm's sag on the way down: at 4.5 cm and again at 8 mm over the
+    seat it waits for the hanging clamp to stop swinging, measures its miss and corrects, until within 2 mm."""
     L, yl = ctx.left, YAW_HOME["left"]
     st = ctx.states()
-    off = np.asarray(mk.tcps()[0]) - kit.pose(st, "clamp")[0]  # TCP from the pliers' frame, as they hang
-    dest = np.asarray(dest_origin, float)
+    off = np.asarray(mk.tcps()[0]) - pivot(st)  # TCP from the pivot, as the clamp hangs
+    dest = np.asarray(dest_pivot, float)
     yield from L.move((dest[0] + off[0], dest[1] + off[1], CARRY_HIGH), yaw=yl, duration=2.0)
-    yield from L.move(tuple(dest + off + np.array([0, 0, PRE])), yaw=yl, duration=1.0)
-    yield from L.wait(0.4)
-    st = ctx.states()
-    err = dest - kit.pose(st, "clamp")[0] + np.array([0, 0, PRE])  # measured with the bands still clear
-    err[2] = 0.0
-    yield from L.move(tuple(dest + off + err + np.array([0, 0, PRE])), yaw=yl, duration=0.5)
-    yield from L.move(tuple(dest + off + err + np.array([0, 0, FINE])), yaw=yl, duration=0.8)
-    yield from L.wait(0.4)
-    fine = dest - kit.pose(ctx.states(), "clamp")[0] + np.array([0, 0, FINE])  # again, the bands just clear
-    fine[0] = max(-0.0015, min(0.0015, fine[0]))  # (across the pipe the fixed band has ~2 mm to spare)
-    fine[2] = 0.0
-    err = err + fine
-    yield from L.move(tuple(dest + off + err + np.array([0, 0, FINE])), yaw=yl, duration=0.5)
+    err = np.zeros(3)
+    for h, dur in ((PRE, 1.0), (FINE, 0.8)):
+        yield from L.move(tuple(dest + off + err + np.array([0, 0, h])), yaw=yl, duration=dur)
+        for _ in range(4):
+            yield from L.wait(0.6)
+            miss = dest + np.array([0, 0, h]) - pivot(ctx.states())
+            miss[2] = 0.0
+            if np.linalg.norm(miss) < 0.002:
+                break
+            err = err + np.clip(miss, -0.02, 0.02)
+            yield from L.move(tuple(dest + off + err + np.array([0, 0, h])), yaw=yl, duration=0.5)
     yield from L.move(tuple(dest + off + err + np.array([0, 0, settle])), yaw=yl, duration=0.8)
     yield from L.wait(0.3)
-    print(f"    pliers lowered: off {np.round((dest - kit.pose(ctx.states(), 'clamp')[0]) * 1000, 1)} mm "
+    print(f"    clamp lowered: pivot off {np.round((dest - pivot(ctx.states())) * 1000, 1)} mm "
           f"(corrected {np.round(err * 1000, 1)} mm), ypr {_ypr(ctx.states())}, open {lever_deg(ctx.states()):.1f} deg",
           flush=True)
 
 
-def release_and_hold(ctx):
-    """Left hand: take the locked pliers' handles, squeeze as hard as it can (the release trigger presses in, the
-    jaws unlock), then ease off just enough for the spring to open the jaws, still holding them."""
-    from yam_arena.constants import FINGER_CLOSED, FINGER_OPEN
+def take_clamp(ctx):
+    """Left hand: reach down to the clamp's handles and squeeze them together: the jaws open (CARRY_DEG) and let go
+    of the pipe; keep squeezing."""
+    from yam_arena.constants import FINGER_OPEN
 
     L, yl = ctx.left, YAW_HOME["left"]
     a, b = handle_points(ctx.states())
     yield from reach_down(ctx, L, (a + b) / 2, yl, FINGER_OPEN)
-    yield from L.grip(FINGER_CLOSED, duration=0.6)
-    yield from L.wait(0.3)
-    st = ctx.states()
-    print(f"    release squeezed: trigger in {trigger_in(st) * 1000:.1f} mm, locked {lever_locked()}, on the pipes "
-          f"{kit.engaged('clamp_lock')}", flush=True)
-    a, _ = handle_points(st)
+    a, b = handle_points(ctx.states())
     t = np.asarray(mk.tcps()[0])
-    w = carry_width()
-    yield from L.move((a[0] + w / 2, t[1], t[2]), yaw=yl, finger=squeeze_finger(w, CARRY_FORCE), duration=0.8)
+    yield from L.move((float((a[0] + b[0]) / 2), t[1], t[2]), yaw=yl, finger=squeeze_finger(CARRY_W, CARRY_FORCE),
+                      duration=1.0)
     yield from L.wait(0.3)
-    print(f"    pliers open in hand: {lever_deg(ctx.states()):.1f} deg", flush=True)
+    print(f"    clamp squeezed open: {lever_deg(ctx.states()):.1f} deg", flush=True)
 
 
-def lock_and_let_go(ctx):
-    """Left hand, pliers seated: squeeze the handles shut (firmly, short of the release trigger): they lock. Let go."""
+def release_clamp(ctx):
+    """Left hand, the open clamp seated: open the fingers slowly; the spring closes the bands onto the pipe. Lift
+    clear."""
     from yam_arena.constants import FINGER_OPEN
 
     L, yl = ctx.left, YAW_HOME["left"]
-    a, _ = handle_points(ctx.states())
-    t = np.asarray(mk.tcps()[0])
-    yield from L.move((a[0] + SHUT_W / 2, t[1], t[2]), yaw=yl, finger=squeeze_finger(SHUT_W, LOCK_FORCE),
-                      duration=1.2)
-    yield from L.wait(0.4)
-    st = ctx.states()
-    print(f"    pliers squeezed: open {lever_deg(st):.1f} deg, trigger in {trigger_in(st) * 1000:.1f} mm, "
-          f"locked {lever_locked()}, on the pipes "
-          f"{kit.engaged('clamp_lock')}, off {np.round(clamp_seat_error(st), 4)}", flush=True)
+    yield from L.grip(finger_for(0.5 * (CARRY_W + 2 * HANDLE_OUT)), duration=0.8)
     yield from L.grip(FINGER_OPEN, duration=0.5)
+    yield from L.wait(0.3)
+    st = ctx.states()
+    print(f"    clamp let go: jaws {lever_deg(st):.1f} deg, on the joint {clamp_on_joint(st)}, "
+          f"off {np.round(clamp_seat_error(st), 4)}, ypr {_ypr(st)}", flush=True)
     t = mk.tcps()[0]
     yield from L.move((t[0], t[1], HIGH), yaw=yl, duration=0.6)
 
@@ -941,28 +910,26 @@ def lift_clear(ctx):
 
 
 def clamp_on(ctx):
-    """Left hand: unlock the pliers on their stand, lift them off, carry them over the joint, lower them straight
-    down onto the pipes and squeeze them shut: they lock and grip the pipes."""
-    yield from release_and_hold(ctx)
+    """Left hand: squeeze the clamp open on its stand, lift it off, carry it over the joint, lower it straight down
+    onto the pipes and let go: the spring closes the bands on the pipes."""
+    yield from take_clamp(ctx)
     yield from lift_clear(ctx)
     c, _ = seat_frame(ctx.states())
-    yield from carry_to(ctx, c)
-    yield from lock_and_let_go(ctx)
+    yield from carry_to(ctx, c + np.array([0.0, 0.0, ZP]))
+    yield from release_clamp(ctx)
 
 
 def clamp_off(ctx):
-    """Left hand: unlock the pliers on the pipes, lift them straight off, lower them onto their stand and lock them
-    there."""
-    yield from release_and_hold(ctx)
+    """Left hand: squeeze the clamp open on the joint, lift it straight off, lower it onto its stand and let go."""
+    yield from take_clamp(ctx)
     yield from lift_clear(ctx)
-    sp = kit.parts["clamp"].spawn
-    yield from carry_to(ctx, sp[:3, 3])
-    yield from lock_and_let_go(ctx)
+    yield from carry_to(ctx, _rest_pivot)
+    yield from release_clamp(ctx)
 
 
 def tilt_hold(ctx, deg):
-    """Left hand: grip the left pipe and turn the pipes (and the pliers locked on them) ``deg`` about their axis, in
-    their V-blocks (the blocks' grip helps hold the pliers' weight), and keep holding. Returns what tilt_back needs."""
+    """Left hand: grip the left pipe and turn the pipes (and the clamp gripping them) ``deg`` about their axis, in
+    their V-blocks (the blocks' grip helps hold the clamp's weight), and keep holding. Returns what tilt_back needs."""
     from yam_arena.constants import FINGER_CLOSED, FINGER_OPEN
     from yam_arena.demo import grip_rotation
 
@@ -973,12 +940,31 @@ def tilt_hold(ctx, deg):
     yield from L.move(tuple(c + np.array([0, 0, 0.05])), yaw=yl, finger=FINGER_OPEN, duration=1.0)
     yield from L.move(tuple(c), yaw=yl, duration=0.6)
     yield from L.grip(FINGER_CLOSED, duration=0.5)
-    for s in (0.5, 1.0):
-        yield from move_rot(L, c, _ry(deg * s) @ g0, duration=0.8)
-    yield from L.wait(0.3)
+    off = np.zeros(3)
+    for s in (0.25, 0.5, 0.75, 1.0):
+        off = yield from _turn_on_axis(ctx, c, off, _ry(deg * s) @ g0)
     st = ctx.states()
-    print(f"    tilted: mark 1 at {mark_angle(st):+.1f}, pliers at {clamp_turn(st):+.1f} deg", flush=True)
-    return c, g0, deg
+    print(f"    tilted: mark 1 at {mark_angle(st):+.1f}, clamp at {clamp_turn(st):+.1f} deg, axis off "
+          f"{np.round(_axis_miss(st) * 1000, 2)} mm", flush=True)
+    return c, g0, deg, off
+
+
+def _axis_miss(objects):
+    """Where the fixed pipe's axis should be (held level in its V-blocks) minus where it is, at the hand."""
+    a = kit.point(objects, "pipe_fixed", HOLD_LOCAL)
+    return np.array([AX_X - a[0], 0.0, AX_Z - a[2]])
+
+
+def _turn_on_axis(ctx, c, off, rot, duration=0.5):
+    """One step of a turn about the pipes' axis: TCP at c + off, then nudge off so the gripped pipe's axis stays where
+    its V-blocks hold it (the soft arm, turning, lifted it out of line)."""
+    L = ctx.left
+    yield from move_rot(L, c + off, rot, duration=duration)
+    for _ in range(2):
+        yield from L.wait(0.15)
+        off = np.clip(off + 0.8 * _axis_miss(ctx.states()), -0.015, 0.015)
+        yield from move_rot(L, c + off, rot, duration=0.2)
+    return off
 
 
 def tilt_back(ctx, held):
@@ -986,14 +972,13 @@ def tilt_back(ctx, held):
     from yam_arena.constants import FINGER_OPEN
 
     L, yl = ctx.left, YAW_HOME["left"]
-    c, g0, deg = held
-    for s in (0.5, 0.0):
-        yield from move_rot(L, c, _ry(deg * s) @ g0, duration=0.8)
-    yield from L.wait(0.2)
+    c, g0, deg, off = held
+    for s in (0.75, 0.5, 0.25, 0.0):
+        off = yield from _turn_on_axis(ctx, c, off, _ry(deg * s) @ g0)
     yield from L.grip(FINGER_OPEN, duration=0.4)
     yield from L.move((float(c[0]), float(c[1]), HIGH), yaw=yl, duration=0.8)
     st = ctx.states()
-    print(f"    tilted back: mark 1 at {mark_angle(st):+.1f}, pliers at {clamp_turn(st):+.1f} deg", flush=True)
+    print(f"    tilted back: mark 1 at {mark_angle(st):+.1f}, clamp at {clamp_turn(st):+.1f} deg", flush=True)
 
 
 def _ry(deg):
@@ -1109,7 +1094,7 @@ def take_gun(ctx):
     rg = mk.quat_to_mat(g_quat)
     hold = np.asarray(mk.tcps()[1]) - np.asarray(g_pos)
     gun = {"rg": rg, "hold": hold, "err": np.zeros(3)}
-    # beside the joint (the pliers' head is over it), the wire tip 2 cm over the loose pipe: measure how far off it is
+    # beside the joint (the clamp's head is over it), the wire tip 2 cm over the loose pipe: measure how far off it is
     # there, to correct every move after
     beside = tip_at(ctx, 0.0, PIPE_R + 0.02) + np.array([0.0, -DIP_Y, 0.0])
     yield from R.move(tuple(hand_for(gun, beside + np.array([0, 0, 0.03]))), yaw=yr, duration=1.5)
@@ -1133,15 +1118,15 @@ def hand_for(gun, tip):
 
 
 def exposed(objects, deg) -> bool:
-    """Whether the joint at ``deg`` (from straight up, +x positive) is open to the gun: anywhere with the pliers off;
-    with them on, not under their bands' unslotted tops."""
-    if not kit.engaged("clamp_lock"):
+    """Whether the joint at ``deg`` (from straight up, +x positive) is open to the gun: anywhere with the clamp off;
+    with it on, not under their bands' unslotted tops."""
+    if not gripping():
         return True
     a = (deg - clamp_turn(objects) + 180.0) % 360.0 - 180.0
     return abs(a) >= COVERED
 
 
-DIP_Y = 0.05  # the gun moves between stretches of joint this far to the side (-y), clear of the pliers' bands
+DIP_Y = 0.05  # the gun moves between stretches of joint this far to the side (-y), clear of the clamp's bands
 
 
 LIFT_R = 0.009  # over a third that already has its heat, the tip runs this far off the pipe (out of reach)
@@ -1156,7 +1141,8 @@ def _pass_move(ctx, gun, d0, d):
     need = []
     for a in (d0 + 0.2 * (d - d0), (d0 + d) / 2, d - 0.2 * (d - d0)):
         t = third_at(st, tip_at(ctx, a, PIPE_R + 0.001))
-        if t is not None and (t // 3) not in welded() and heat()[t] < WELD_THIRD_S:
+        k = None if t is None else t // 3
+        if t is not None and k not in welded() and heat()[t] < WELD_THIRD_S and heat()[3 * k:3 * k + 3].sum() < 4.3:
             need.append(float(heat()[t]))
     if not need:
         return tip_at(ctx, d, PIPE_R + LIFT_R), 0.25
@@ -1164,7 +1150,7 @@ def _pass_move(ctx, gun, d0, d):
 
 
 def sweep(ctx, gun, span_deg, step_deg=5.0):
-    """A pass from span_deg[0] to span_deg[1] along the joint, in stretches the pliers leave open: for each, the wire
+    """A pass from span_deg[0] to span_deg[1] along the joint, in stretches the clamp leaves open: for each, the wire
     tip comes in from the side (-y) over the start, goes down to the joint, runs along it and goes back out."""
     R, yr = ctx.right, YAW_HOME["right"]
     st = ctx.states()
@@ -1180,13 +1166,44 @@ def sweep(ctx, gun, span_deg, step_deg=5.0):
         runs.append(run)
     side = np.array([0.0, -DIP_Y, 0.0])
     for run in runs:
+        # closed loop: the soft arm's error depends on its pose, so after each move the wire tip's measured miss is
+        # fed back into the next (corr, capped at 25 mm)
+        corr = np.zeros(3)
+
+        def fix(target):
+            nonlocal corr
+            corr = np.clip(corr + 0.8 * (target - wire_tip(ctx.states())), -0.025, 0.025)
+
         yield from R.move(tuple(hand_for(gun, tip_at(ctx, run[0], PIPE_R + 0.02) + side)), yaw=yr, duration=1.0)
-        yield from R.move(tuple(hand_for(gun, tip_at(ctx, run[0], PIPE_R + LIFT_R))), yaw=yr, duration=0.6)
+        target = tip_at(ctx, run[0], PIPE_R + LIFT_R)
+        for _ in range(3):
+            yield from R.move(tuple(hand_for(gun, target) + corr), yaw=yr, duration=0.5)
+            fix(target)
+        low = False
         for d0, d in zip(run, run[1:]):
             tip, dur = _pass_move(ctx, gun, d0, d)
-            yield from R.move(tuple(hand_for(gun, tip)), yaw=yr, duration=dur)
-        yield from R.move(tuple(hand_for(gun, tip_at(ctx, run[-1], PIPE_R + 0.02))), yaw=yr, duration=0.5)
-        yield from R.move(tuple(hand_for(gun, tip_at(ctx, run[-1], PIPE_R + 0.02) + side)), yaw=yr, duration=0.6)
+            lifted = dur <= 0.25 + 1e-9
+            if lifted and low:  # off the joint straight away, before moving on over stretches already done
+                up = tip_at(ctx, d0, PIPE_R + LIFT_R)
+                yield from R.move(tuple(hand_for(gun, up) + corr), yaw=yr, duration=0.15)
+            yield from R.move(tuple(hand_for(gun, tip) + corr), yaw=yr, duration=dur)
+            fix(tip)
+            low = not lifted
+            if os.environ.get("PRW_DEBUG"):
+                st = ctx.states()
+                c, r = joint_frame(st)
+                v = r.T @ (wire_tip(st) - c)
+                print(f"      tip at {d:+.0f}: along {v[1] * 1000:+.1f} mm, radial "
+                      f"{(math.hypot(v[0], v[2]) - PIPE_R) * 1000:+.1f} mm, asked {np.round((tip - wire_tip(st)) * 1000, 1)} "
+                      f"mm off, gap {pipe_gap(st) * 1000:.1f}", flush=True)
+                if abs(d - 52) < 1e-6 and "dumped" not in mk.MEMORY:
+                    import pickle
+                    mk.MEMORY["dumped"] = True
+                    pickle.dump({k: kit.pose(st, k) for k in ("gun", "clamp", "lever", "pipe_fixed", "pipe_loose")}
+                                | {"tcps": [np.asarray(t) for t in mk.tcps()]},
+                                open(os.environ["PRW_DEBUG"], "wb"))
+        yield from R.move(tuple(hand_for(gun, tip_at(ctx, run[-1], PIPE_R + 0.02)) + corr), yaw=yr, duration=0.5)
+        yield from R.move(tuple(hand_for(gun, tip_at(ctx, run[-1], PIPE_R + 0.02) + side) + corr), yaw=yr, duration=0.6)
     h = heat()
     print(f"    pass {span_deg}: stretches {[(r[0], r[-1]) for r in runs]}, welded {sorted(welded())}, burned "
           f"{sorted(burned())}, segment heat {[round(float(h[3 * k:3 * k + 3].sum()), 1) for k in range(N_SEG)]}",
